@@ -1,7 +1,8 @@
 """Админ-панель /admin: управление доменами (allowlist в БД) и просмотр статистики.
 
-Доступна на любом коротком домене (роуты /admin/* матчатся раньше catch-all /{slug}),
-защищена логином (сессия в подписанной куке через SessionMiddleware).
+Доступна ТОЛЬКО на домене settings.ADMIN_HOST (если задан) — на прочих доменах /admin
+отдаёт 404, чтобы панель не светилась на публичных коротких доменах. Защищена логином
+(сессия в подписанной куке через SessionMiddleware).
 """
 import secrets
 from urllib.parse import urlencode
@@ -18,7 +19,22 @@ from .database import get_db
 from .models import Domain, ShortLink
 
 templates = Jinja2Templates(directory="app/templates")
-router = APIRouter(prefix="/admin")
+
+
+def admin_host_only(request: Request) -> None:
+    """Гейт на уровне роутера: пускаем только на ADMIN_HOST (если задан), иначе 404.
+
+    404 (а не 403) — чтобы на публичных доменах `/admin` выглядел как несуществующий путь
+    и даже не показывал форму логина.
+    """
+    if settings.ADMIN_HOST:
+        host = normalize_domain(request.headers.get("host", ""))
+        if host != settings.ADMIN_HOST:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+
+
+# Гейт по домену применяется ко ВСЕМ роутам админки (включая login/logout)
+router = APIRouter(prefix="/admin", dependencies=[Depends(admin_host_only)])
 
 
 # --- авторизация -----------------------------------------------------------

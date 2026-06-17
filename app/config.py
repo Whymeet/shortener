@@ -41,6 +41,9 @@ class Settings:
     ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     SERVER_IP: str = os.getenv("SERVER_IP", "")
+    # Домен, на котором доступна админка /admin. На прочих доменах /admin отдаёт 404
+    # (не светится на публичных коротких доменах). Пусто = доступна везде (только для дева).
+    ADMIN_HOST: str = normalize_domain(os.getenv("ADMIN_HOST", ""))
     # Длина слага и алфавит (base62: 0-9A-Za-z — перечислять ЯВНО, НЕ диапазоном [A-z]: в ASCII между
     # цифрами/заглавными/строчными лежит мусор. Цифры → больше ёмкости, как у bit.ly/tinyurl.)
     SLUG_LENGTH: int = int(os.getenv("SLUG_LENGTH", "5"))
