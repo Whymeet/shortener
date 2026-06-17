@@ -16,7 +16,7 @@ RESERVED = {
 
 
 def generate_slug() -> str:
-    """Случайный слаг из SLUG_LENGTH символов алфавита (52^5 ≈ 380 млн при дефолте)."""
+    """Случайный слаг из SLUG_LENGTH символов алфавита (base62: 62^5 ≈ 916 млн при дефолте)."""
     return "".join(
         secrets.choice(settings.SLUG_ALPHABET) for _ in range(settings.SLUG_LENGTH)
     )

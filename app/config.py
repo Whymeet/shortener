@@ -12,11 +12,12 @@ class Settings:
     API_KEY: str = os.getenv("API_KEY", "")
     # Базовый URL короткого домена, из него собирается short_url в ответе
     SHORT_BASE_URL: str = os.getenv("SHORT_BASE_URL", "http://localhost:8080").rstrip("/")
-    # Длина слага и алфавит ([A-Za-z] по умолчанию — НЕ [A-z], без мусора между Z и a)
+    # Длина слага и алфавит (base62: 0-9A-Za-z — перечислять ЯВНО, НЕ диапазоном [A-z]: в ASCII между
+    # цифрами/заглавными/строчными лежит мусор. Цифры → больше ёмкости, как у bit.ly/tinyurl.)
     SLUG_LENGTH: int = int(os.getenv("SLUG_LENGTH", "5"))
     SLUG_ALPHABET: str = os.getenv(
         "SLUG_ALPHABET",
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
     )
     # 302 — каждый клик проходит через сервис (счётчик + смена назначения).
     # 301 кэшируется браузером намертво и ломает подсчёт кликов.
