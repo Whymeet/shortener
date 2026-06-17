@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shortener
+      POSTGRES_PASSWORD: shortener
+      POSTGRES_DB: shortener
+    volumes:
+      - shortener_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  shortener:
+    build: .
+    env_file: .env
+    depends_on:
+      - postgres
+    ports:
+      # хост:контейнер — nginx короткого домена проксирует на 127.0.0.1:8080
+      - "8080:8000"
+    restart: unless-stopped
+
+volumes:
+  shortener_pg:
