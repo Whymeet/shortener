@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Вход — Сокращатель{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<h1>Вход в админку</h1>
+{% if error %}<div class="msg" style="border-color:var(--danger);background:rgba(239,68,68,.12);">{{ error }}</div>{% endif %}
+<form method="post" action="/admin/login" class="card">
+  <div style="margin-bottom:12px;"><input type="text" name="username" placeholder="Логин" autofocus></div>
+  <div style="margin-bottom:12px;"><input type="password" name="password" placeholder="Пароль"></div>
+  <button type="submit">Войти</button>
+</form>
+{% endblock %}

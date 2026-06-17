@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Домены — Сокращатель{% endblock %}
+{% block content %}
+<h1>Домены</h1>
+<table>
+  <thead><tr><th>Домен</th><th>Статус</th><th class="num">Ссылок</th><th class="num">Кликов</th><th></th></tr></thead>
+  <tbody>
+  {% for d in domains %}
+    <tr>
+      <td>{{ d.domain }}</td>
+      <td>{% if d.is_active %}<span class="badge active">активен</span>{% else %}<span class="badge pending">ожидает настройки</span>{% endif %}</td>
+      <td class="num">{{ d.links }}</td>
+      <td class="num">{{ d.clicks }}</td>
+      <td><a href="/admin/domains/{{ d.id }}">подробнее →</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Доменов пока нет</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Добавить домен</h2>
+<form method="post" action="/admin/domains" class="card">
+  <input type="text" name="domain" placeholder="например, krokozaim.ru">
+  <button type="submit">Добавить</button>
+  <div class="muted" style="margin-top:8px;">Домен добавится со статусом «ожидает настройки». Затем настройте DNS/nginx/TLS и отметьте активным.</div>
+</form>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ d.domain }} — Сокращатель{% endblock %}
+{% block content %}
+<p><a href="/admin">← к доменам</a></p>
+<h1>{{ d.domain }}
+  {% if d.is_active %}<span class="badge active">активен</span>{% else %}<span class="badge pending">ожидает настройки</span>{% endif %}
+</h1>
+
+<div class="card row-actions">
+  {% if d.is_active %}
+    <form class="inline" method="post" action="/admin/domains/{{ d.id }}/deactivate"><button class="warn">Деактивировать</button></form>
+  {% else %}
+    <form class="inline" method="post" action="/admin/domains/{{ d.id }}/activate"><button>Отметить активным</button></form>
+  {% endif %}
+  <form class="inline" method="post" action="/admin/domains/{{ d.id }}/delete"
+        onsubmit="return confirm('Удалить домен {{ d.domain }} из allowlist? Новые ссылки на нём создаваться не будут.');">
+    <button class="danger">Удалить</button>
+  </form>
+</div>
+
+{% if not d.is_active %}
+<div class="card">
+  <h2 style="margin-top:0;">Чек-лист настройки</h2>
+  <ul class="checklist">
+    <li>☐ DNS: A-запись <code>{{ d.domain }}</code> → <code>{{ server_ip or "IP вашего сервера" }}</code></li>
+    <li>☐ nginx: добавить <code>{{ d.domain }}</code> в <code>server_name</code> (deploy/nginx.short.conf), затем <code>nginx -t &amp;&amp; systemctl reload nginx</code></li>
+    <li>☐ TLS: <code>certbot --nginx --expand -d {{ d.domain }}</code> (вместе со всеми остальными доменами)</li>
+    <li>☐ Готово — нажмите «Отметить активным»; после этого на домене можно создавать ссылки.</li>
+  </ul>
+</div>
+{% endif %}
+
+<h2>Ссылки ({{ links|length }})</h2>
+<table>
+  <thead><tr><th>slug</th><th>Полная ссылка</th><th class="num">Кликов</th><th>Создана</th><th>Последний клик</th></tr></thead>
+  <tbody>
+  {% for l in links %}
+    <tr>
+      <td><code>{{ l.slug }}</code></td>
+      <td class="truncate" title="{{ l.full_link }}">{{ l.full_link }}</td>
+      <td class="num">{{ l.click_count }}</td>
+      <td class="muted">{{ l.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td class="muted">{% if l.last_clicked_at %}{{ l.last_clicked_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Ссылок пока нет</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,13 +1,36 @@
-"""Модель короткой ссылки."""
+"""Модели: короткая ссылка и разрешённый домен."""
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Column, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from .database import Base
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class Domain(Base):
+    """Разрешённый короткий домен (allowlist, управляется через /admin).
+
+    is_active=False — домен добавлен, но инфраструктура (DNS/nginx/TLS) ещё не настроена:
+    создавать на нём ссылки нельзя (shorten → 400), пока оператор не отметит активным.
+    """
+
+    __tablename__ = "domains"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    domain = Column(String(255), unique=True, nullable=False)  # уже нормализован
+    is_active = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class ShortLink(Base):

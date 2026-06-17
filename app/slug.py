@@ -7,6 +7,7 @@ from .config import settings
 RESERVED = {
     "health",
     "shorten",
+    "admin",
     "stats",
     "docs",
     "redoc",

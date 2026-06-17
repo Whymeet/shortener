@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Админка — Сокращатель{% endblock %}</title>
+  <style>
+    :root{--bg:#0f1419;--card:#1a2230;--fg:#e6edf3;--muted:#8b98a5;--accent:#3b82f6;
+          --ok:#22c55e;--warn:#f59e0b;--danger:#ef4444;--border:#2a3442;}
+    *{box-sizing:border-box;}
+    body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);}
+    a{color:var(--accent);text-decoration:none;} a:hover{text-decoration:underline;}
+    header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;
+           background:var(--card);border-bottom:1px solid var(--border);}
+    header .brand{font-weight:600;}
+    main{max-width:1000px;margin:24px auto;padding:0 20px;}
+    h1{font-size:20px;margin:0 0 16px;} h2{font-size:16px;margin:24px 0 12px;}
+    table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--border);
+          border-radius:8px;overflow:hidden;}
+    th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);}
+    th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+    tr:last-child td{border-bottom:none;}
+    td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;}
+    .badge.active{background:rgba(34,197,94,.15);color:var(--ok);}
+    .badge.pending{background:rgba(245,158,11,.15);color:var(--warn);}
+    form.inline{display:inline;}
+    input[type=text],input[type=password]{background:#0d1117;color:var(--fg);border:1px solid var(--border);
+          border-radius:6px;padding:8px 10px;font:inherit;min-width:240px;}
+    button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:8px 14px;
+           font:inherit;font-weight:600;cursor:pointer;}
+    button.ghost{background:transparent;border:1px solid var(--border);color:var(--fg);}
+    button.danger{background:var(--danger);} button.warn{background:var(--warn);color:#1a2230;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;}
+    .muted{color:var(--muted);}
+    .msg{background:rgba(59,130,246,.12);border:1px solid var(--accent);border-radius:6px;padding:10px 12px;margin-bottom:16px;}
+    .checklist{list-style:none;padding:0;} .checklist li{padding:6px 0;}
+    code{background:#0d1117;padding:1px 6px;border-radius:4px;}
+    .row-actions{display:flex;gap:8px;}
+    .truncate{max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  </style>
+</head>
+<body>
+  {% block header %}
+  <header>
+    <div class="brand"><a href="/admin">🔗 Сокращатель — админка</a></div>
+    <form class="inline" method="post" action="/admin/logout"><button class="ghost">Выйти</button></form>
+  </header>
+  {% endblock %}
+  <main>
+    {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

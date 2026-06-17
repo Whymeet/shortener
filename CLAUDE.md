@@ -24,10 +24,12 @@ FastAPI (Python 3.12) + SQLAlchemy 2 + PostgreSQL · Docker Compose · nginx (к
 ```
 shortener/
 ├── app/
-│   ├── main.py        # FastAPI-приложение, все 3 эндпоинта, lifespan (create_all)
-│   ├── config.py      # Settings из переменных окружения (объект `settings`)
+│   ├── main.py        # FastAPI-приложение, эндпоинты shorten/redirect/health, lifespan (create_all+сид), SessionMiddleware
+│   ├── admin.py       # APIRouter /admin: управление доменами + статистика (Jinja2), логин
+│   ├── templates/     # Jinja2-шаблоны админки (base/login/dashboard/domain_detail) + inline-CSS
+│   ├── config.py      # Settings из переменных окружения (объект `settings`) + normalize_domain()
 │   ├── database.py    # engine, SessionLocal, get_db(), Base
-│   ├── models.py      # модель ShortLink + helper utcnow()
+│   ├── models.py      # модели ShortLink, Domain + helper utcnow()
 │   ├── schemas.py     # Pydantic ShortenRequest / ShortenResponse
 │   ├── slug.py        # generate_slug() + множество RESERVED
 │   └── auth.py        # require_api_key() — проверка заголовка X-API-Key
@@ -42,9 +44,10 @@ shortener/
 
 | Метод | Путь        | Auth         | Назначение |
 |-------|-------------|--------------|------------|
-| POST  | `/shorten`  | `X-API-Key`  | Создать/получить короткую ссылку. Домен — из `Host`, дедуп по `(domain, hash)`. 400 если `Host` не в `ALLOWED_DOMAINS`. Тело `{full_link}`, ответ `ShortenResponse`. |
+| POST  | `/shorten`  | `X-API-Key`  | Создать/получить короткую ссылку. Домен — из `Host`, дедуп по `(domain, hash)`. 400 если домен не активен в allowlist (БД). Тело `{full_link}`, ответ `ShortenResponse`. |
 | GET   | `/{slug}`   | — (публично) | 302-редирект на `full_link` (с **влитым query** запроса) + инкремент `click_count`. Ищет по `(domain из Host, slug)`. 404 если слаг/домен не найден. |
-| GET   | `/health`   | —            | `{"status":"ok"}` для healthcheck. |
+| —     | `/admin`    | сессия       | Веб-админка (Jinja2): домены + статистика. Логин по `ADMIN_USERNAME`/`ADMIN_PASSWORD`, см. `app/admin.py`. |
+| GET   | `/health`   | —            | `{"status":"ok"}` для healthcheck (доменно-независим). |
 | GET   | `/docs`     | —            | Авто-Swagger (можно слать запросы из браузера, кнопка Authorize). |
 
 `ShortenResponse`: `{ slug, short_url, full_link, click_count, created }`.
@@ -53,16 +56,19 @@ shortener/
 ## Функции (что где живёт)
 
 - **`app/main.py`**
-  - `lifespan(app)` — на старте создаёт таблицы (`create_all`).
-  - `health()` — пинг.
-  - `resolve_domain(request)` — домен из заголовка `Host` (через `normalize_domain`), если он в `ALLOWED_DOMAINS`, иначе `None` (статус выбирает эндпоинт).
+  - `lifespan(app)` — на старте `create_all` + `_seed_domains()` (сид allowlist из env, если таблица `domains` пуста).
+  - подключает `SessionMiddleware` (кука админки) и `admin.router` (ДО catch-all `/{slug}`).
+  - `health()` — пинг (доменно-независим).
+  - `resolve_domain(request)` — нормализованный домен из заголовка `Host` (без проверки allowlist — её делают эндпоинты).
+  - `_active_domain(db, domain)` — домен зарегистрирован в `domains` и `is_active` (используется в `shorten`).
   - `merge_query(stored_url, incoming_query)` — накладывает query короткой ссылки на целевой URL: входящие ключи перекрывают сохранённые, остальные (включая пустые `subN=`) остаются, новые добавляются (`urllib.parse`, `keep_blank_values=True`).
-  - `shorten(payload, request, db)` — домен через `resolve_domain` (нет → 400); считает `sha256(full_link)`, ищет дубль по `(domain, full_link_hash)`; если нет — в цикле (до 10 попыток) генерит слаг и `INSERT` с `domain`, ловит `IntegrityError` (коллизия `(domain,slug)` ИЛИ гонка по `(domain,hash)`) и ретраит. Защищён `Depends(require_api_key)`.
-  - `redirect(slug, request, db)` — домен через `resolve_domain` (нет → 404); находит ссылку по `(domain, slug)`, **атомарным** `UPDATE ... click_count = click_count + 1` инкрементит счётчик, редиректит на `merge_query(full_link, request.url.query)` со `status_code=settings.REDIRECT_STATUS`.
+  - `shorten(payload, request, db)` — домен через `resolve_domain`; **гейт `_active_domain` (нет/неактивен → 400)**; дедуп по `(domain, full_link_hash)`; цикл (до 10 попыток) генерит слаг и `INSERT` с `domain`, ловит `IntegrityError` и ретраит. Защищён `Depends(require_api_key)`.
+  - `redirect(slug, request, db)` — домен через `resolve_domain`; находит по `(domain, slug)` (неизвестный/неактивный домен → нет строк → 404, **без доп. запроса** — hot-path не нагружен); **атомарный** инкремент; редирект на `merge_query(full_link, request.url.query)`.
   - `_response(link, created)` — собирает `ShortenResponse`, склеивает `short_url` из `SHORT_URL_SCHEME://link.domain/link.slug`.
-- **`app/slug.py`** — `generate_slug()`: `secrets.choice` по `SLUG_ALPHABET`, длина `SLUG_LENGTH`. `RESERVED` — имена, занятые явными роутами (`health`, `shorten`, `docs`, …), их нельзя выдавать как слаг.
+- **`app/admin.py`** — `APIRouter(prefix="/admin")`: `require_admin` (нет сессии → 303 на логин), `check_credentials` (constant-time), логин/логаут, дашборд (агрегаты по доменам), add/activate/deactivate/delete домена, страница домена со ссылками. Шаблоны — `app/templates/`.
+- **`app/slug.py`** — `generate_slug()`: `secrets.choice` по `SLUG_ALPHABET`, длина `SLUG_LENGTH`. `RESERVED` — имена, занятые явными роутами (`health`, `shorten`, `admin`, `docs`, …), их нельзя выдавать как слаг.
 - **`app/auth.py`** — `require_api_key()`: сравнивает заголовок `X-API-Key` с `settings.API_KEY` через `secrets.compare_digest` (constant-time). 500 если ключ не сконфигурирован, 401 если не совпал.
-- **`app/models.py`** — `ShortLink` (таблица `short_links`), `utcnow()` (timezone-aware UTC).
+- **`app/models.py`** — `ShortLink` (таблица `short_links`), `Domain` (таблица `domains` — allowlist), `utcnow()` (timezone-aware UTC).
 - **`app/config.py`** — синглтон `settings` (все параметры из env) + `normalize_domain()` (канон домена: lower-case, без схемы/пути/порта; общий для `ALLOWED_DOMAINS` и `Host`).
 - **`app/database.py`** — `get_db()` (FastAPI-зависимость, закрывает сессию в `finally`).
 
@@ -81,11 +87,20 @@ shortener/
 `uq_short_links_domain_hash (domain, full_link_hash)`. Отдельные индексы на `slug`/`hash`
 не нужны — составной UNIQUE с ведущей `domain` покрывает запросы редиректа и дедупа.
 
+Таблица `domains` (allowlist, управляется через `/admin`):
+- `id` BigInteger PK
+- `domain` String(255) **UNIQUE** — нормализованный короткий домен
+- `is_active` Boolean default False — `False` = добавлен, но инфра (DNS/nginx/TLS) ещё не настроена (на нём нельзя создавать ссылки)
+- `created_at` — timezone-aware UTC
+
+Источник истины для allowlist — эта таблица; env `ALLOWED_DOMAINS` засеивается в неё (как
+активные) только при пустой таблице на старте.
+
 ## Команды
 
 ```bash
 # Запуск (Docker)
-cp .env.example .env        # вписать API_KEY и ALLOWED_DOMAINS
+cp .env.example .env        # вписать API_KEY, ALLOWED_DOMAINS, ADMIN_USERNAME/PASSWORD, SECRET_KEY
 docker compose up -d --build
 
 # Логи
@@ -111,8 +126,11 @@ curl -s -D - -o /dev/null "http://127.0.0.1:8080/<slug>?sub1=X" -H "Host: krokoz
 |-------------------|-----------------------------|------------|
 | `DATABASE_URL`    | `postgresql://shortener:shortener@postgres:5432/shortener` | Подключение к БД |
 | `API_KEY`         | `""` (обязательно задать)   | Секрет для `POST /shorten`. Без него `/shorten` отдаёт 500 |
-| `ALLOWED_DOMAINS` | `go.kybyshka-dev.ru`        | Разрешённые короткие домены (через запятую/пробел, БЕЗ схемы). Каждый — независимый шортенер; домен берётся из `Host` |
+| `ALLOWED_DOMAINS` | `go.kybyshka-dev.ru`        | **Первичный сид** доменов в таблицу `domains` (источник истины — БД/панель). Через запятую/пробел, БЕЗ схемы |
 | `SHORT_URL_SCHEME`| `https`                     | Схема для сборки `short_url` (в проде `https`; за nginx uvicorn видит `http`, потому схему задаём явно, а не из request) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `""` | Логин/пароль админ-панели `/admin` (constant-time сравнение) |
+| `SECRET_KEY`      | `""`                        | Подпись сессионной куки админки (`openssl rand -hex 32`). Пуст → эфемерный ключ на процесс (логины не переживут рестарт) |
+| `SERVER_IP`       | `""`                        | IP сервера для чек-листа DNS на странице домена (опц.) |
 | `SLUG_LENGTH`     | `5`                         | Длина слага (base62: 62⁵ ≈ 916 млн комбинаций) |
 | `SLUG_ALPHABET`   | `0-9 A-Z a-z` (base62)      | Алфавит слага — перечислять **явно** (`0123456789A…Za…z`), НЕ диапазоном `[A-z]` (в ASCII между цифрами/буквами лежит мусор) |
 | `REDIRECT_STATUS` | `302`                       | `302` — клики считаются и назначение можно менять; `301` кэшируется браузером (счётчик слепнет) |
@@ -120,15 +138,16 @@ curl -s -D - -o /dev/null "http://127.0.0.1:8080/<slug>?sub1=X" -H "Host: krokoz
 ## Ключевые решения и грабли
 
 - **Полная ссылка хранится целиком**, не разбирается на маркеры (web_id/offer_id/sub*). Любой новый `sub8` проходит без правки схемы. Дедуп — по `sha256` от полной строки.
-- **Мультидомен: каждый домен — независимый шортенер.** Домен из `Host` (`resolve_domain`); уникальность и дедуп — по паре `(domain, …)`. Один slug на разных доменах = разные ссылки. Неизвестный `Host`: `shorten` → 400, `redirect` → 404. `health` доменно-независим (healthcheck ходит по IP, не зовёт `resolve_domain`).
+- **Мультидомен: каждый домен — независимый шортенер.** Домен из `Host` (`resolve_domain`); уникальность и дедуп — по паре `(domain, …)`. Один slug на разных доменах = разные ссылки. `health` доменно-независим (healthcheck ходит по IP).
+- **Allowlist доменов — в БД (таблица `domains`), управляется через `/admin`.** env `ALLOWED_DOMAINS` — лишь первичный сид. `shorten` гейтит по активному домену из БД (`_active_domain`, 400 если нет/неактивен). `redirect` (hot-path) проверку домена НЕ делает отдельным запросом — полагается на поиск по `(domain, slug)` (неизвестный домен → нет строк → 404), лишних обращений к БД нет. Поток нового домена: добавить в панели (pending) → настроить DNS/nginx/TLS → активировать.
 - **Проброс query.** Редирект вливает query короткой ссылки в целевой URL (`merge_query`): входящее перекрывает сохранённое по ключу, пустые `subN=` сохраняются (`keep_blank_values=True`). Так per-user данные из рассылки доезжают до leads.tech.
 - **`short_url`: схема из `SHORT_URL_SCHEME`, домен — из самой ссылки.** Не выводим из request: за nginx uvicorn видит `http`, а публичные ссылки всегда `https`.
 - **Дедуп идемпотентен и потокобезопасен.** Сначала lookup по `(domain, full_link_hash)`; если параллельный запрос успел вставить — `IntegrityError` (составной UNIQUE) ловится, и из БД достаётся уже существующая строка.
 - **Слаги** не могут совпасть с системными путями — список `RESERVED` в `slug.py`. При добавлении нового явного роута добавь его имя туда же.
-- **`/{slug}` — catch-all в корне.** Явные роуты (`/health`, `/shorten`, `/docs`, `/openapi.json`) FastAPI регистрирует раньше и матчит первыми, поэтому коллизии нет. Любой неизвестный путь → 404 из `redirect()`.
+- **`/{slug}` — catch-all в корне.** Явные роуты (`/health`, `/shorten`, `/admin/*`, `/docs`, `/openapi.json`) FastAPI регистрирует раньше и матчит первыми, поэтому коллизии нет. Любой неизвестный путь → 404 из `redirect()`. Админка `/admin` доменно-независима (доступна на любом домене, защищена логином).
 - **302 vs 301.** По умолчанию 302, чтобы каждый клик проходил через сервис (счётчик + возможность сменить назначение). 301 браузер кэширует намертво.
 - **Время — UTC** (timezone-aware), в отличие от основного проекта vktest2, где всё в МСК. Здесь сознательно UTC как стандарт для standalone-сервиса.
-- **Миграций нет.** Меняешь модель → схема НЕ обновится сама на существующей БД (`create_all` создаёт только отсутствующие таблицы). Для изменения колонок — `ALTER` вручную или подключить Alembic. Мультидоменная миграция (выполнялась вручную; уникальность была на UNIQUE-**индексах** `ix_short_links_*`, не на constraints — поэтому `DROP INDEX`):
+- **Миграций нет.** Меняешь модель → схема НЕ обновится сама на существующей БД (`create_all` создаёт только отсутствующие таблицы). НОВЫЕ таблицы создаются автоматически — напр. `domains` (allowlist) появилась без миграции. Для изменения КОЛОНОК существующей таблицы — `ALTER` вручную или Alembic. Мультидоменная миграция `short_links` (выполнялась вручную; уникальность была на UNIQUE-**индексах** `ix_short_links_*`, не на constraints — поэтому `DROP INDEX`):
   ```sql
   BEGIN;
   DROP INDEX IF EXISTS ix_short_links_slug;
