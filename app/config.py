@@ -3,17 +3,38 @@ import os
 
 
 def normalize_domain(value: str) -> str:
-    """Канон домена для сравнения: lower-case, без схемы/пути/порта.
+    """Канон домена для сравнения/хранения: lower-case, без схемы/пути/порта, в Punycode (ASCII).
 
-    Применяется и к списку ALLOWED_DOMAINS, и к заголовку Host входящего запроса,
-    чтобы сравнение было устойчивым (`krokozaim.ru:8080`, `https://krokozaim.ru/` → `krokozaim.ru`).
+    Применяется и к списку ALLOWED_DOMAINS, и к заголовку Host, и к вводу в админке. IDN-домены
+    (кириллица и пр.) приводятся к ASCII-форме `xn--...` — именно так они приходят в заголовке
+    Host и TLS SNI, поэтому кириллица в панели и реальный Host совпадают.
+    (`КРОКОЗАЙМ.РФ`, `https://крокозайм.рф/` → `xn--80anhbapjbp.xn--p1ai`).
     """
     v = value.strip().lower()
     if "//" in v:                 # отрезаем схему https:// если затесалась
         v = v.split("//", 1)[1]
     v = v.split("/", 1)[0]        # отрезаем путь
     v = v.split(":", 1)[0]        # отрезаем порт
+    if not v:
+        return v
+    try:
+        v = v.encode("idna").decode("ascii")   # IDN → Punycode (xn--...)
+    except Exception:
+        pass                      # не-IDN / некорректный ввод — оставляем как есть (не совпадёт → безопасно)
     return v
+
+
+def domain_to_unicode(domain: str) -> str:
+    """Punycode (`xn--...`) → Unicode для красивого отображения (short_url, админка).
+
+    ASCII-домены без `xn--` возвращаются как есть. Ошибки/мусор — возвращаем вход без изменений.
+    """
+    if not domain:
+        return domain
+    try:
+        return domain.encode("ascii").decode("idna")
+    except Exception:
+        return domain
 
 
 class Settings:

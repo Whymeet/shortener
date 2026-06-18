@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .config import normalize_domain, settings
+from .config import domain_to_unicode, normalize_domain, settings
 from .database import get_db
 from .models import Domain, ShortLink
 
@@ -114,7 +114,13 @@ def _dashboard_rows(db: Session) -> list[dict]:
         .order_by(Domain.created_at)
     )
     return [
-        {"id": r[0], "domain": r[1], "is_active": r[2], "links": r[3], "clicks": r[4]}
+        {
+            "id": r[0],
+            "domain": domain_to_unicode(r[1]),   # красивое отображение IDN (xn-- → кириллица)
+            "is_active": r[2],
+            "links": r[3],
+            "clicks": r[4],
+        }
         for r in db.execute(stmt).all()
     ]
 
@@ -185,5 +191,10 @@ def domain_detail(request: Request, domain_id: int, db: Session = Depends(get_db
     return templates.TemplateResponse(
         request,
         "domain_detail.html",
-        {"d": d, "links": links, "server_ip": settings.SERVER_IP},
+        {
+            "d": d,
+            "domain_display": domain_to_unicode(d.domain),
+            "links": links,
+            "server_ip": settings.SERVER_IP,
+        },
     )

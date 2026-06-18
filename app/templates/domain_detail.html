@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}{{ d.domain }} — Сокращатель{% endblock %}
+{% block title %}{{ domain_display }} — Сокращатель{% endblock %}
 {% block content %}
 {% import "_guide.html" as g %}
 <p><a href="/admin">← к доменам</a></p>
-<h1>{{ d.domain }}
+<h1>{{ domain_display }}
   {% if d.is_active %}<span class="badge active">активен</span>{% else %}<span class="badge pending">ожидает настройки</span>{% endif %}
 </h1>
 
@@ -14,17 +14,17 @@
     <form class="inline" method="post" action="/admin/domains/{{ d.id }}/activate"><button>Отметить активным</button></form>
   {% endif %}
   <form class="inline" method="post" action="/admin/domains/{{ d.id }}/delete"
-        onsubmit="return confirm('Удалить домен {{ d.domain }} из allowlist? Новые ссылки на нём создаваться не будут.');">
+        onsubmit="return confirm('Удалить домен {{ domain_display }} из allowlist? Новые ссылки на нём создаваться не будут.');">
     <button class="danger">Удалить</button>
   </form>
 </div>
 
 {% if not d.is_active %}
 <div class="card">
-  <h2 style="margin-top:0;">Как подключить домен <code>{{ d.domain }}</code></h2>
+  <h2 style="margin-top:0;">Как подключить домен <code>{{ domain_display }}</code></h2>
   <p class="muted">Домен добавлен, но пока <b>не активен</b> — создавать на нём ссылки нельзя.
      Пройдите 2 шага: привяжите DNS и активируйте домен.</p>
-  {{ g.steps(d.domain, server_ip) }}
+  {{ g.steps(domain_display, server_ip) }}
 </div>
 {% endif %}
 

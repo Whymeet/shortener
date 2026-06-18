@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import admin
 from .auth import require_api_key
-from .config import normalize_domain, settings
+from .config import domain_to_unicode, normalize_domain, settings
 from .database import Base, SessionLocal, engine, get_db
 from .models import Domain, ShortLink, utcnow
 from .schemas import ShortenRequest, ShortenResponse
@@ -186,7 +186,7 @@ def redirect(slug: str, request: Request, db: Session = Depends(get_db)):
 def _response(link: ShortLink, created: bool) -> ShortenResponse:
     return ShortenResponse(
         slug=link.slug,
-        short_url=f"{settings.SHORT_URL_SCHEME}://{link.domain}/{link.slug}",
+        short_url=f"{settings.SHORT_URL_SCHEME}://{domain_to_unicode(link.domain)}/{link.slug}",
         full_link=link.full_link,
         click_count=link.click_count,
         created=created,
