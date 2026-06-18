@@ -15,9 +15,26 @@ services:
     depends_on:
       - postgres
     ports:
-      # хост:контейнер — nginx короткого домена проксирует на 127.0.0.1:8080
-      - "8080:8000"
+      # только loopback — для локального дебага/смоук-тестов. Публичный трафик идёт через caddy.
+      - "127.0.0.1:8080:8000"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - shortener
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # ПЕРСИСТЕНТНО: выпущенные сертификаты + ACME-аккаунт (не удалять!)
+      - caddy_config:/config
     restart: unless-stopped
 
 volumes:
   shortener_pg:
+  caddy_data:
+  caddy_config:

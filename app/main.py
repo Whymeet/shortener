@@ -89,6 +89,18 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/internal/tls-allow")
+def tls_allow(domain: str = "", db: Session = Depends(get_db)):
+    """ask-эндпоинт для Caddy on-demand TLS: 2xx → выпускать сертификат, иначе нет.
+
+    Caddy шлёт GET /internal/tls-allow?domain=<host> перед выпуском сертификата на новый SNI.
+    Разрешаем ТОЛЬКО активные домены из БД — тот же гейт, что и для shorten (_active_domain).
+    """
+    if _active_domain(db, normalize_domain(domain)):
+        return {"ok": True}
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "Домен не активен")
+
+
 @app.post(
     "/shorten",
     response_model=ShortenResponse,

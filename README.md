@@ -88,7 +88,8 @@ cp .env.example .env
 # отредактировать API_KEY (openssl rand -hex 32) и ALLOWED_DOMAINS
 docker compose up -d --build
 ```
-Сервис слушает `127.0.0.1:8080`. Своя БД Postgres внутри compose, схема создаётся на старте.
+Стек поднимает 3 сервиса: `postgres`, `shortener` (uvicorn, локально на `127.0.0.1:8080`) и
+`caddy` (реверс-прокси с авто-TLS на портах 80/443). Своя БД внутри compose, схема создаётся на старте.
 
 Локальный тест без TLS — добавь `localhost` в `ALLOWED_DOMAINS`, `SHORT_URL_SCHEME=http`,
 и шли запросы с нужным `Host`:
@@ -98,13 +99,19 @@ curl -X POST http://127.0.0.1:8080/shorten -H "Host: krokozaim.ru" \
   -d '{"full_link":"https://example.com/x"}'
 ```
 
-## Деплой коротких доменов
-1. A-запись каждого домена (`go.kybyshka-dev.ru`, `krokozaim.ru`, …) → этот сервер.
-2. Прописать домены в `ALLOWED_DOMAINS` (`.env`) и в `server_name` (`deploy/nginx.short.conf`).
-3. Скопировать конфиг в `/etc/nginx/conf.d/`, `nginx -t && systemctl reload nginx`.
-4. TLS (один SAN-сертификат на все домены):
-   `certbot --nginx -d go.kybyshka-dev.ru -d krokozaim.ru -d nashzaim.ru`.
-   Добавить домен позже: `certbot --nginx --expand -d <все домены, включая новый>`.
+## Деплой (Docker + Caddy, авто-TLS)
+Прокси и TLS — это **Caddy** внутри `docker-compose` (сервис `caddy`, порты 80/443) с
+**On-Demand TLS**: сертификаты Let's Encrypt выпускаются автоматически при первом заходе на
+домен. Ручного nginx/certbot нет; добавление домена не требует правок конфигов и перезапуска.
+
+1. На сервере (порты 80/443 свободны) задать `ACME_EMAIL` в `.env`, затем
+   `docker compose up -d --build` (поднимет postgres + shortener + caddy).
+2. Добавить домен в админке `/admin` → **активировать**.
+3. Владелец домена ставит A-запись на IP сервера; проверить `dig +short <домен>`.
+4. Готово — первый заход на `https://<домен>/...` сам выпустит сертификат (Caddy спрашивает
+   у сервиса `/internal/tls-allow`, разрешён ли домен — отдаётся 200 только для активных).
+
+Сертификаты лежат в томе `caddy_data` — **не удалять** (иначе перевыпуск и лимиты Let's Encrypt).
 
 > Изменение модели на существующей БД миграциями НЕ покрыто (`create_all` колонки не
 > добавляет). Колонка `domain` и составные UNIQUE добавляются вручную — см. CLAUDE.md.
@@ -140,6 +147,7 @@ async def make_short(full_link: str, domain: str) -> str:
 | `SECRET_KEY`       | —                           | Подпись сессионной куки (`openssl rand -hex 32`); в проде задать |
 | `SERVER_IP`        | —                           | IP сервера для чек-листа DNS на странице домена (опц.)|
 | `ADMIN_HOST`       | — (пусто = везде)           | Домен, на котором доступна `/admin`; на других → `404`. В проде задать (напр. `go.kybyshka-dev.ru`) |
+| `ACME_EMAIL`       | —                           | Email для Let's Encrypt (Caddy выпускает TLS автоматически) |
 | `SLUG_LENGTH`      | `5`                         | Длина слага (base62, 62^5 ≈ 916 млн)                  |
 | `SLUG_ALPHABET`    | base62 (`0-9 A-Z a-z`)      | Алфавит слага                                         |
 | `REDIRECT_STATUS`  | `302`                       | `302` (со счётчиком) или `301` (кэш браузера)         |

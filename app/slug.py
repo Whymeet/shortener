@@ -8,6 +8,7 @@ RESERVED = {
     "health",
     "shorten",
     "admin",
+    "internal",
     "stats",
     "docs",
     "redoc",

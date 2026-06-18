@@ -16,7 +16,7 @@
 
 ## Стек
 
-FastAPI (Python 3.12) + SQLAlchemy 2 + PostgreSQL · Docker Compose · nginx (короткий домен).
+FastAPI (Python 3.12) + SQLAlchemy 2 + PostgreSQL · Docker Compose · Caddy (реверс-прокси + авто-TLS on-demand).
 Схема БД создаётся на старте через `Base.metadata.create_all()` — **Alembic намеренно не используется** (одна таблица).
 
 ## Структура
@@ -36,7 +36,7 @@ shortener/
 ├── Dockerfile
 ├── docker-compose.yml # сервис shortener (порт 8080:8000) + своя Postgres
 ├── .env.example
-├── deploy/nginx.short.conf  # server-блок коротких доменов (мультидомен, список server_name)
+├── deploy/Caddyfile         # Caddy: реверс-прокси + авто-TLS (on-demand) для любых доменов
 └── README.md
 ```
 
@@ -48,6 +48,7 @@ shortener/
 | GET   | `/{slug}`   | — (публично) | 302-редирект на `full_link` (с **влитым query** запроса) + инкремент `click_count`. Ищет по `(domain из Host, slug)`. 404 если слаг/домен не найден. |
 | —     | `/admin`    | сессия       | Веб-админка (Jinja2): домены + статистика. Логин по `ADMIN_USERNAME`/`ADMIN_PASSWORD`, см. `app/admin.py`. |
 | GET   | `/health`   | —            | `{"status":"ok"}` для healthcheck (доменно-независим). |
+| GET   | `/internal/tls-allow` | — | ask для Caddy on-demand TLS: 200 если `?domain=` активен в БД, иначе 404. Caddy спрашивает перед выпуском сертификата. |
 | GET   | `/docs`     | —            | Авто-Swagger (можно слать запросы из браузера, кнопка Authorize). |
 
 `ShortenResponse`: `{ slug, short_url, full_link, click_count, created }`.
@@ -60,7 +61,8 @@ shortener/
   - подключает `SessionMiddleware` (кука админки) и `admin.router` (ДО catch-all `/{slug}`).
   - `health()` — пинг (доменно-независим).
   - `resolve_domain(request)` — нормализованный домен из заголовка `Host` (без проверки allowlist — её делают эндпоинты).
-  - `_active_domain(db, domain)` — домен зарегистрирован в `domains` и `is_active` (используется в `shorten`).
+  - `_active_domain(db, domain)` — домен зарегистрирован в `domains` и `is_active` (используется в `shorten` и `tls_allow`).
+  - `tls_allow(domain, db)` — ask-эндпоинт для Caddy on-demand TLS: 200 если `_active_domain`, иначе 404.
   - `merge_query(stored_url, incoming_query)` — накладывает query короткой ссылки на целевой URL: входящие ключи перекрывают сохранённые, остальные (включая пустые `subN=`) остаются, новые добавляются (`urllib.parse`, `keep_blank_values=True`).
   - `shorten(payload, request, db)` — домен через `resolve_domain`; **гейт `_active_domain` (нет/неактивен → 400)**; дедуп по `(domain, full_link_hash)`; цикл (до 10 попыток) генерит слаг и `INSERT` с `domain`, ловит `IntegrityError` и ретраит. Защищён `Depends(require_api_key)`.
   - `redirect(slug, request, db)` — домен через `resolve_domain`; находит по `(domain, slug)` (неизвестный/неактивный домен → нет строк → 404, **без доп. запроса** — hot-path не нагружен); **атомарный** инкремент; редирект на `merge_query(full_link, request.url.query)`.
@@ -90,7 +92,7 @@ shortener/
 Таблица `domains` (allowlist, управляется через `/admin`):
 - `id` BigInteger PK
 - `domain` String(255) **UNIQUE** — нормализованный короткий домен
-- `is_active` Boolean default False — `False` = добавлен, но инфра (DNS/nginx/TLS) ещё не настроена (на нём нельзя создавать ссылки)
+- `is_active` Boolean default False — `False` = добавлен, но не активирован (DNS не привязан / не подтверждён): нельзя создавать ссылки И не выпускается TLS (гейт ask `/internal/tls-allow`)
 - `created_at` — timezone-aware UTC
 
 Источник истины для allowlist — эта таблица; env `ALLOWED_DOMAINS` засеивается в неё (как
@@ -127,11 +129,12 @@ curl -s -D - -o /dev/null "http://127.0.0.1:8080/<slug>?sub1=X" -H "Host: krokoz
 | `DATABASE_URL`    | `postgresql://shortener:shortener@postgres:5432/shortener` | Подключение к БД |
 | `API_KEY`         | `""` (обязательно задать)   | Секрет для `POST /shorten`. Без него `/shorten` отдаёт 500 |
 | `ALLOWED_DOMAINS` | `go.kybyshka-dev.ru`        | **Первичный сид** доменов в таблицу `domains` (источник истины — БД/панель). Через запятую/пробел, БЕЗ схемы |
-| `SHORT_URL_SCHEME`| `https`                     | Схема для сборки `short_url` (в проде `https`; за nginx uvicorn видит `http`, потому схему задаём явно, а не из request) |
+| `SHORT_URL_SCHEME`| `https`                     | Схема для сборки `short_url` (в проде `https`; за Caddy uvicorn видит `http`, потому схему задаём явно, а не из request) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `""` | Логин/пароль админ-панели `/admin` (constant-time сравнение) |
 | `SECRET_KEY`      | `""`                        | Подпись сессионной куки админки (`openssl rand -hex 32`). Пуст → эфемерный ключ на процесс (логины не переживут рестарт) |
 | `SERVER_IP`       | `""`                        | IP сервера для чек-листа DNS на странице домена (опц.) |
 | `ADMIN_HOST`      | `""` (пусто = везде)        | Домен, на котором доступна `/admin`; на прочих → 404 (`admin_host_only`). В проде задать |
+| `ACME_EMAIL`      | `""`                        | Email для Let's Encrypt (Caddy выпускает TLS автоматически, on-demand) |
 | `SLUG_LENGTH`     | `5`                         | Длина слага (base62: 62⁵ ≈ 916 млн комбинаций) |
 | `SLUG_ALPHABET`   | `0-9 A-Z a-z` (base62)      | Алфавит слага — перечислять **явно** (`0123456789A…Za…z`), НЕ диапазоном `[A-z]` (в ASCII между цифрами/буквами лежит мусор) |
 | `REDIRECT_STATUS` | `302`                       | `302` — клики считаются и назначение можно менять; `301` кэшируется браузером (счётчик слепнет) |
@@ -140,9 +143,10 @@ curl -s -D - -o /dev/null "http://127.0.0.1:8080/<slug>?sub1=X" -H "Host: krokoz
 
 - **Полная ссылка хранится целиком**, не разбирается на маркеры (web_id/offer_id/sub*). Любой новый `sub8` проходит без правки схемы. Дедуп — по `sha256` от полной строки.
 - **Мультидомен: каждый домен — независимый шортенер.** Домен из `Host` (`resolve_domain`); уникальность и дедуп — по паре `(domain, …)`. Один slug на разных доменах = разные ссылки. `health` доменно-независим (healthcheck ходит по IP).
-- **Allowlist доменов — в БД (таблица `domains`), управляется через `/admin`.** env `ALLOWED_DOMAINS` — лишь первичный сид. `shorten` гейтит по активному домену из БД (`_active_domain`, 400 если нет/неактивен). `redirect` (hot-path) проверку домена НЕ делает отдельным запросом — полагается на поиск по `(domain, slug)` (неизвестный домен → нет строк → 404), лишних обращений к БД нет. Поток нового домена: добавить в панели (pending) → настроить DNS/nginx/TLS → активировать.
+- **Allowlist доменов — в БД (таблица `domains`), управляется через `/admin`.** env `ALLOWED_DOMAINS` — лишь первичный сид. `shorten` гейтит по активному домену из БД (`_active_domain`, 400 если нет/неактивен). `redirect` (hot-path) проверку домена НЕ делает отдельным запросом — полагается на поиск по `(domain, slug)` (неизвестный домен → нет строк → 404), лишних обращений к БД нет. Поток нового домена: добавить в панели (pending) → владелец привязывает DNS на наш IP → активировать. TLS выпускается сам (Caddy on-demand), nginx/certbot руками не трогаем.
 - **Проброс query.** Редирект вливает query короткой ссылки в целевой URL (`merge_query`): входящее перекрывает сохранённое по ключу, пустые `subN=` сохраняются (`keep_blank_values=True`). Так per-user данные из рассылки доезжают до leads.tech.
-- **`short_url`: схема из `SHORT_URL_SCHEME`, домен — из самой ссылки.** Не выводим из request: за nginx uvicorn видит `http`, а публичные ссылки всегда `https`.
+- **`short_url`: схема из `SHORT_URL_SCHEME`, домен — из самой ссылки.** Не выводим из request: за Caddy uvicorn видит `http`, а публичные ссылки всегда `https`.
+- **Авто-TLS через Caddy on-demand.** Caddy (в compose, порты 80/443) при первом handshake на новый домен сам выпускает Let's Encrypt-сертификат, спросив у `/internal/tls-allow?domain=` (200 только для активных доменов из БД). Сертификаты — в томе `caddy_data` (персистентный!). Добавление домена не требует правок конфига/рестарта. ask вызывается раз на домен (не на каждый запрос) — hot-path не страдает.
 - **Дедуп идемпотентен и потокобезопасен.** Сначала lookup по `(domain, full_link_hash)`; если параллельный запрос успел вставить — `IntegrityError` (составной UNIQUE) ловится, и из БД достаётся уже существующая строка.
 - **Слаги** не могут совпасть с системными путями — список `RESERVED` в `slug.py`. При добавлении нового явного роута добавь его имя туда же.
 - **`/{slug}` — catch-all в корне.** Явные роуты (`/health`, `/shorten`, `/admin/*`, `/docs`, `/openapi.json`) FastAPI регистрирует раньше и матчит первыми, поэтому коллизии нет. Любой неизвестный путь → 404 из `redirect()`. Админка `/admin` ограничена доменом `ADMIN_HOST` (гейт `admin_host_only` на уровне роутера: на прочих доменах → 404, форма логина не светится), защищена логином.
@@ -160,13 +164,17 @@ curl -s -D - -o /dev/null "http://127.0.0.1:8080/<slug>?sub1=X" -H "Host: krokoz
   COMMIT;
   ```
 
-## Деплой коротких доменов
+## Деплой (Docker + Caddy, авто-TLS)
 
-1. A-запись каждого домена (`go.kybyshka-dev.ru`, `krokozaim.ru`, …) → этот сервер; дождаться `dig +short`.
-2. Прописать домены в `ALLOWED_DOMAINS` (`.env`) и в `server_name` (`deploy/nginx.short.conf`).
-3. `deploy/nginx.short.conf` → `/etc/nginx/conf.d/`, `nginx -t && systemctl reload nginx` (проксирует на `127.0.0.1:8080`).
-4. TLS (один SAN-сертификат): `certbot --nginx -d go.kybyshka-dev.ru -d krokozaim.ru -d nashzaim.ru`. Новый домен потом — `certbot --nginx --expand -d <все, включая новый>`.
-5. На существующей БД — сначала ручная миграция (см. «Миграций нет»), затем деплой кода.
+Прокси и TLS — Caddy в `docker-compose` (сервис `caddy`, порты 80/443) с **On-Demand TLS**.
+Никакого ручного nginx/certbot; добавление домена не требует правок конфига и рестарта.
+
+1. На сервере (порты 80/443 свободны) задать `ACME_EMAIL` в `.env`, затем `docker compose up -d --build`.
+2. Добавить домен в `/admin` → активировать (`is_active=True`).
+3. Владелец домена ставит A-запись на IP сервера; проверить `dig +short <домен>`.
+4. Первый заход на `https://<домен>/...` сам выпустит сертификат (Caddy → `/internal/tls-allow` → 200).
+5. На существующей БД — сначала ручная миграция `short_links` (см. «Миграций нет»), затем деплой кода.
+   Том `caddy_data` (сертификаты) — НЕ удалять.
 
 ## Интеграция с основным бэкендом (vktest2)
 
