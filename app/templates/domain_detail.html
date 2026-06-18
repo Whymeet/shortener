@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ d.domain }} — Сокращатель{% endblock %}
 {% block content %}
+{% import "_guide.html" as g %}
 <p><a href="/admin">← к доменам</a></p>
 <h1>{{ d.domain }}
   {% if d.is_active %}<span class="badge active">активен</span>{% else %}<span class="badge pending">ожидает настройки</span>{% endif %}
@@ -23,35 +24,7 @@
   <h2 style="margin-top:0;">Как подключить домен <code>{{ d.domain }}</code></h2>
   <p class="muted">Домен добавлен, но пока <b>не активен</b> — создавать на нём ссылки нельзя.
      Пройдите 4 шага, затем нажмите «Отметить активным» вверху страницы.</p>
-
-  <ol class="guide">
-    <li>
-      <b>Шаг 1. DNS.</b> В панели вашего регистратора домена (где покупали <code>{{ d.domain }}</code>)
-      создайте <b>A-запись</b>, которая направит домен на наш сервер:
-      <pre>Имя (Host):  @     (или {{ d.domain }})
-Тип:         A
-Значение:    {{ server_ip or "IP вашего сервера" }}</pre>
-      Подождите, пока запись разойдётся (обычно несколько минут, иногда до часа), и проверьте —
-      команда должна вернуть IP сервера:
-      <pre>dig +short {{ d.domain }}     →  {{ server_ip or "IP сервера" }}</pre>
-    </li>
-    <li>
-      <b>Шаг 2. nginx.</b> На сервере добавьте домен в строку <code>server_name</code>
-      (файл <code>/etc/nginx/conf.d/nginx.short.conf</code>), затем проверьте конфиг и перезагрузите:
-      <pre>nginx -t && systemctl reload nginx</pre>
-    </li>
-    <li>
-      <b>Шаг 3. HTTPS-сертификат.</b> Выпустите TLS-сертификат (перечислите <b>все</b> свои домены
-      через <code>-d</code>, включая новый — тогда обновится единый сертификат):
-      <pre>certbot --nginx --expand -d {{ d.domain }}</pre>
-      Важно: DNS из шага 1 уже должен указывать на сервер, иначе сертификат не выпустится.
-    </li>
-    <li>
-      <b>Шаг 4. Активация.</b> Вернитесь на эту страницу и нажмите кнопку
-      <b>«Отметить активным»</b> вверху. После этого на <code>{{ d.domain }}</code> можно
-      создавать короткие ссылки, и они будут открываться по https.
-    </li>
-  </ol>
+  {{ g.steps(d.domain, server_ip) }}
 </div>
 {% endif %}
 

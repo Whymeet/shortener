@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Домены — Сокращатель{% endblock %}
 {% block content %}
+{% import "_guide.html" as g %}
 <h1>Домены</h1>
 <table>
   <thead><tr><th>Домен</th><th>Статус</th><th class="num">Ссылок</th><th class="num">Кликов</th><th></th></tr></thead>
@@ -23,6 +24,13 @@
 <form method="post" action="/admin/domains" class="card">
   <input type="text" name="domain" placeholder="например, krokozaim.ru">
   <button type="submit">Добавить</button>
-  <div class="muted" style="margin-top:8px;">Домен добавится со статусом «ожидает настройки». Откройте его страницу («подробнее →») — там пошаговый гайд: DNS → nginx → сертификат → активация.</div>
+  <div class="muted" style="margin-top:8px;">Добавится со статусом «ожидает настройки» — затем пройдите 4 шага ниже.</div>
 </form>
+
+<div class="card">
+  <h2 style="margin-top:0;">Как подключить новый домен</h2>
+  <p class="muted">Что нужно сделать после добавления. На странице самого домена («подробнее →»)
+     эти же шаги будут с уже подставленными доменом и командами.</p>
+  {{ g.steps("ваш-домен.ru", server_ip) }}
+</div>
 {% endblock %}

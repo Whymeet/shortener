@@ -124,7 +124,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"domains": _dashboard_rows(db), "msg": request.query_params.get("msg")},
+        {
+            "domains": _dashboard_rows(db),
+            "msg": request.query_params.get("msg"),
+            "server_ip": settings.SERVER_IP,
+        },
     )
 
 
