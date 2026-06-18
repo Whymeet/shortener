@@ -1,116 +1,129 @@
-# Как создать короткую ссылку (API)
+# Интеграция с сервисом коротких ссылок
 
-Мини-справочник по запросам к сервису-сокращателю.
+Инструкция для подключения вашего сервиса к нашему сокращателю ссылок.
+По одному HTTP-запросу вы получаете короткую ссылку; при переходе по ней пользователь
+редиректится на вашу исходную ссылку (302), а добавленные к короткой ссылке параметры
+доезжают до неё.
 
-## TL;DR
-
-```bash
-curl -X POST https://go.kybyshka-dev.ru/shorten \
-  -H "X-API-Key: <API_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"full_link":"https://t.leads.tech/click/12/9/?sub1=...&sub2=..."}'
-```
-В ответе бери поле **`short_url`**.
+**Что вам выдаём мы:**
+- **короткий домен** — например `go.kybyshka-dev.ru` (далее `<КОРОТКИЙ_ДОМЕН>`);
+- **API-ключ** — секрет для заголовка `X-API-Key` (далее `<API_KEY>`).
 
 ---
 
-## Эндпоинт
+## Создать короткую ссылку
 
-`POST /shorten`
+```
+POST https://<КОРОТКИЙ_ДОМЕН>/shorten
+X-API-Key: <API_KEY>
+Content-Type: application/json
 
-| Что | Как |
-|-----|-----|
-| **Auth** | заголовок `X-API-Key: <ключ>` (обязателен) |
-| **Короткий домен** | определяется заголовком `Host`. На прод-домене — это сам адрес (`https://go.kybyshka-dev.ru/shorten`); локально/из docker-сети — задаётся заголовком `Host`. Домен должен быть **активен** в админке |
-| **Тело** | JSON `{"full_link": "<исходная ссылка>"}`. Ссылка должна начинаться с `http://` или `https://`, длина ≤ 4096 |
-| **Content-Type** | `application/json` |
+{ "full_link": "https://пример.ru/длинная/ссылка?a=1&b=2" }
+```
 
-### Ответ (`200 OK`)
+| Поле | Требование |
+|------|------------|
+| `X-API-Key` | обязателен; ваш ключ |
+| `full_link` | исходная ссылка; начинается с `http://` или `https://`, длина ≤ 4096 |
+
+**Ответ `200 OK`:**
 ```json
 {
   "slug": "GVZzA",
   "short_url": "https://go.kybyshka-dev.ru/GVZzA",
-  "full_link": "https://t.leads.tech/click/12/9/?sub1=...",
+  "full_link": "https://пример.ru/длинная/ссылка?a=1&b=2",
   "click_count": 0,
   "created": true
 }
 ```
-- `short_url` — готовая короткая ссылка (схема + домен из `Host` + slug).
-- `created`: `true` — создана новая; `false` — вернули существующую (сработал дедуп).
+Берите поле **`short_url`** — это готовая короткая ссылка.
+`created`: `true` — создана новая, `false` — вернули уже существующую (см. «Дедупликация»).
 
 ---
 
 ## Примеры
 
-### 1. Прод — домен прямо в адресе
-```bash
+**curl**
+```
 curl -X POST https://go.kybyshka-dev.ru/shorten \
   -H "X-API-Key: <API_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"full_link":"http://leadstech.ru/12/pepapapap12w"}'
-```
-Короткая ссылка вернётся как `https://go.kybyshka-dev.ru/<slug>`.
-
-### 2. Другой домен — тем же запросом, меняешь только адрес/Host
-```bash
-curl -X POST https://krokozaim.ru/shorten \
-  -H "X-API-Key: <API_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"full_link":"http://leadstech.ru/12/pepapapap12w"}'
-# → short_url: https://krokozaim.ru/<slug>
+  -d '{"full_link":"https://пример.ru/длинная/ссылка?a=1"}'
 ```
 
-### 3. Локально / из docker-сети — домен через заголовок Host
-```bash
-# ключ удобно подставить из .env
-curl -X POST http://127.0.0.1:8080/shorten \
-  -H "Host: testzaim.ru" \
-  -H "X-API-Key: $(grep '^API_KEY=' .env | cut -d= -f2)" \
-  -H "Content-Type: application/json" \
-  -d '{"full_link":"http://leadstech.ru/12/pepapapap12w"}'
-# → short_url: http(s)://testzaim.ru/<slug>
+**Python (requests)**
 ```
+import requests
 
-### 4. Из кода (Python)
-```python
-import httpx
-
-def make_short(full_link: str, domain: str, api_key: str) -> str:
-    r = httpx.post(
-        f"https://{domain}/shorten",          # публичный адрес = короткий домен
-        headers={"X-API-Key": api_key},
+def make_short(full_link: str) -> str:
+    r = requests.post(
+        "https://go.kybyshka-dev.ru/shorten",
+        headers={"X-API-Key": "<API_KEY>"},
         json={"full_link": full_link},
+        timeout=10,
     )
     r.raise_for_status()
     return r.json()["short_url"]
 ```
 
+**Node.js (fetch)**
+```
+async function makeShort(fullLink) {
+  const res = await fetch("https://go.kybyshka-dev.ru/shorten", {
+    method: "POST",
+    headers: { "X-API-Key": "<API_KEY>", "Content-Type": "application/json" },
+    body: JSON.stringify({ full_link: fullLink }),
+  });
+  if (!res.ok) throw new Error("shorten failed: " + res.status);
+  return (await res.json()).short_url;
+}
+```
+
 ---
 
-## Что важно знать
+## Проброс query-параметров
 
-- **Дедуп пер-домен.** Повторный POST того же `full_link` на тот же домен вернёт **тот же** `slug` с `"created": false`. Один и тот же URL на разных доменах = разные короткие ссылки.
-- **Проброс query.** Любые параметры, добавленные к **короткой** ссылке при клике/рассылке, доезжают до целевого URL: входящие перекрывают сохранённые по имени, остальные сохранённые остаются, новые добавляются. Имена параметров любые (`sub1`, `date`, `clickid`, что угодно).
-  ```
-  Сохранено:   http://leadstech.ru/12/x?sub1=base
-  Короткая:    https://go.kybyshka-dev.ru/GVZzA?sub1=USER&date=2026-06-17
-  Редирект на: http://leadstech.ru/12/x?sub1=USER&date=2026-06-17
-  ```
-- **Домен должен быть активен.** Новый домен сперва добавляется в админке (`/admin`), настраивается (DNS/nginx/TLS) и активируется. На неактивном/незарегистрированном домене `shorten` вернёт `400`.
-- Сервис **не хранит** значения per-click параметров — только счётчик `click_count` и время последнего клика. Детальная статистика по меткам — на стороне leadstech.
+Любые параметры, которые вы добавите к **короткой** ссылке, при переходе доедут до исходной.
+Удобно для подстановки данных на лету (id пользователя, метки кампании и т.п.). Имена
+параметров — любые.
+
+```
+Сокращали:    https://пример.ru/click?sub1=base&sub3=X
+Короткая:     https://go.kybyshka-dev.ru/GVZzA?sub1=USER123&utm=vk
+Переход на:   https://пример.ru/click?sub1=USER123&sub3=X&utm=vk
+```
+Правило: параметр из короткой ссылки **перекрывает** одноимённый в исходной; параметры,
+которых нет в короткой, сохраняются; новые — добавляются.
+
+---
+
+## Дедупликация
+
+Повторный запрос с тем же `full_link` вернёт **ту же** короткую ссылку (`"created": false`),
+новая не создаётся. Так что можно безопасно вызывать `/shorten` повторно.
 
 ---
 
 ## Коды ошибок
 
-| Код | Когда |
-|-----|-------|
-| `400` | домен (из `Host`) не разрешён или не активирован |
-| `401` | нет/неверный `X-API-Key` |
-| `422` | кривое тело: нет `full_link`, не `http(s)://`, длиннее 4096 |
-| `500` | на сервисе не задан `API_KEY` (конфигурация) |
+| Код | Причина |
+|-----|---------|
+| `401` | отсутствует или неверный `X-API-Key` |
+| `422` | некорректное тело: нет `full_link`, ссылка не на `http(s)://` или длиннее 4096 |
+| `400` | короткий домен не разрешён (используйте выданный вам домен) |
 
-## Проверить короткую ссылку
-```bash
-curl -sL https://go.kybyshka-dev.ru/<slug>     # -L = пройти по 302-редиректу
+---
+
+## Проверка
+
 ```
+# создать ссылку
+curl -s -X POST https://go.kybyshka-dev.ru/shorten \
+  -H "X-API-Key: <API_KEY>" -H "Content-Type: application/json" \
+  -d '{"full_link":"https://пример.ru/test"}'
+
+# перейти по короткой ссылке (с параметрами) — увидите редирект на исходную
+curl -sL "https://go.kybyshka-dev.ru/<slug>?sub1=test"
+```
+
+Вопросы по интеграции (домен, ключ, лимиты) — к нам.
