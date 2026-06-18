@@ -20,13 +20,38 @@
 
 {% if not d.is_active %}
 <div class="card">
-  <h2 style="margin-top:0;">Чек-лист настройки</h2>
-  <ul class="checklist">
-    <li>☐ DNS: A-запись <code>{{ d.domain }}</code> → <code>{{ server_ip or "IP вашего сервера" }}</code></li>
-    <li>☐ nginx: добавить <code>{{ d.domain }}</code> в <code>server_name</code> (deploy/nginx.short.conf), затем <code>nginx -t &amp;&amp; systemctl reload nginx</code></li>
-    <li>☐ TLS: <code>certbot --nginx --expand -d {{ d.domain }}</code> (вместе со всеми остальными доменами)</li>
-    <li>☐ Готово — нажмите «Отметить активным»; после этого на домене можно создавать ссылки.</li>
-  </ul>
+  <h2 style="margin-top:0;">Как подключить домен <code>{{ d.domain }}</code></h2>
+  <p class="muted">Домен добавлен, но пока <b>не активен</b> — создавать на нём ссылки нельзя.
+     Пройдите 4 шага, затем нажмите «Отметить активным» вверху страницы.</p>
+
+  <ol class="guide">
+    <li>
+      <b>Шаг 1. DNS.</b> В панели вашего регистратора домена (где покупали <code>{{ d.domain }}</code>)
+      создайте <b>A-запись</b>, которая направит домен на наш сервер:
+      <pre>Имя (Host):  @     (или {{ d.domain }})
+Тип:         A
+Значение:    {{ server_ip or "IP вашего сервера" }}</pre>
+      Подождите, пока запись разойдётся (обычно несколько минут, иногда до часа), и проверьте —
+      команда должна вернуть IP сервера:
+      <pre>dig +short {{ d.domain }}     →  {{ server_ip or "IP сервера" }}</pre>
+    </li>
+    <li>
+      <b>Шаг 2. nginx.</b> На сервере добавьте домен в строку <code>server_name</code>
+      (файл <code>/etc/nginx/conf.d/nginx.short.conf</code>), затем проверьте конфиг и перезагрузите:
+      <pre>nginx -t && systemctl reload nginx</pre>
+    </li>
+    <li>
+      <b>Шаг 3. HTTPS-сертификат.</b> Выпустите TLS-сертификат (перечислите <b>все</b> свои домены
+      через <code>-d</code>, включая новый — тогда обновится единый сертификат):
+      <pre>certbot --nginx --expand -d {{ d.domain }}</pre>
+      Важно: DNS из шага 1 уже должен указывать на сервер, иначе сертификат не выпустится.
+    </li>
+    <li>
+      <b>Шаг 4. Активация.</b> Вернитесь на эту страницу и нажмите кнопку
+      <b>«Отметить активным»</b> вверху. После этого на <code>{{ d.domain }}</code> можно
+      создавать короткие ссылки, и они будут открываться по https.
+    </li>
+  </ol>
 </div>
 {% endif %}
 
